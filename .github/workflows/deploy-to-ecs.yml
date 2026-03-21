@@ -30,7 +30,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-          REPOSITORY: inova-order_service  # ✅ Fixed: Changed to order_service
+          REPOSITORY: inova-order_service
         run: |
           docker build -t $ECR_REGISTRY/$REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$REPOSITORY:$IMAGE_TAG
@@ -89,8 +89,8 @@ jobs:
       - name: Update ECS service
         run: |
           aws ecs update-service \
-            --cluster default \
-            --service inova-orderservice-class-definition-service-awzzic7u \
+            --cluster order-service-cluster \
+            --service order-service \
             --task-definition ${{ steps.register-task.outputs.task-definition-arn }} \
             --force-new-deployment \
             --region eu-north-1
@@ -98,27 +98,30 @@ jobs:
       - name: Wait for service stability
         run: |
           aws ecs wait services-stable \
-            --cluster default \
-            --services inova-orderservice-class-definition-service-awzzic7u \
+            --cluster order-service-cluster \
+            --services order-service \
             --region eu-north-1 || true
 
       - name: Get deployment info
         run: |
           TASK_ARN=$(aws ecs list-tasks \
-            --cluster default \
-            --service-name inova-orderservice-class-definition-service-awzzic7u \
+            --cluster order-service-cluster \
+            --service-name order-service \
             --query "taskArns[0]" \
             --output text)
           
           if [ "$TASK_ARN" != "None" ] && [ -n "$TASK_ARN" ]; then
             PUBLIC_IP=$(aws ecs describe-tasks \
-              --cluster default \
+              --cluster order-service-cluster \
               --tasks $TASK_ARN \
               --query "tasks[0].attachments[0].details[?name=='publicIPv4Address'].value" \
               --output text)
             
-            echo "✅ Order Service deployed!"
+            echo "✅ Order Service deployed successfully!"
             echo "📍 URL: http://$PUBLIC_IP:3002"
+            echo "💚 Health Check: http://$PUBLIC_IP:3002/health"
+            echo "📋 API Endpoint: http://$PUBLIC_IP:3002/api/orders"
           else
-            echo "⚠️  Check service status in AWS Console"
+            echo "⚠️  No tasks found. Check the service status in AWS Console"
+            echo "Go to: https://eu-north-1.console.aws.amazon.com/ecs/home?region=eu-north-1#/clusters/order-service-cluster/services"
           fi
