@@ -51,5 +51,5 @@ app.use(errorHandler);
 app.listen(PORT, '0.0.0.0', () => {
   console.log('iNova Order Service');
   console.log(`Port: ${PORT}`);
-  console.log(`API: http://0.0.0.0:${PORT}/api/orders`);
+  console.log(`API: http://0.0.0.0:3002/api/orders`);
 });
