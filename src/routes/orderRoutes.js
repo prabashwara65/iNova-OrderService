@@ -12,6 +12,6 @@ router.post('/', orderController.createOrder);
 router.put('/:id', orderController.updateOrder);
 router.patch('/:id/status', orderController.updateOrderStatus);
 router.patch('/:id/payment-status', orderController.updatePaymentStatus);
-router.patch('/:id/cancel', orderController.cancelOrder);
+router.patch('/:id/cancel', orderController.cancelOrder); 
 
 module.exports = router;
