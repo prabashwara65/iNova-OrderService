@@ -3,6 +3,7 @@ name: CICD
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -29,33 +30,111 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-          REPOSITORY: inova-product_service
+          REPOSITORY: inova-order_service  # Changed from product_service
         run: |
           docker build -t $ECR_REGISTRY/$REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$REPOSITORY:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/$REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Clean task definition (remove metadata fields)
+      - name: Create task definition
         run: |
-          # Remove fields that can't be used in registration
-          jq 'del(.taskDefinitionArn, .revision, .status, .registeredAt, .registeredBy, .requiresAttributes, .compatibilities, .tags, .enableFaultInjection)' inova-productservice-class-definition-revision1.json > cleaned-task-def.json
-          mv cleaned-task-def.json inova-productservice-class-definition-revision1.json
+          cat > task-definition.json << 'EOF'
+          {
+            "family": "inova-orderservice-class-definition",
+            "taskRoleArn": "arn:aws:iam::749621714427:role/service-role/ecsTaskExecutionRole",
+            "executionRoleArn": "arn:aws:iam::749621714427:role/service-role/ecsTaskExecutionRole",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "1024",
+            "memory": "3072",
+            "runtimePlatform": {
+              "cpuArchitecture": "X86_64",
+              "operatingSystemFamily": "LINUX"
+            },
+            "containerDefinitions": [
+              {
+                "name": "inova-order_service",
+                "image": "${{ steps.build-image.outputs.image }}",
+                "cpu": 0,
+                "portMappings": [
+                  {
+                    "containerPort": 3002,
+                    "hostPort": 3002,
+                    "protocol": "tcp"
+                  }
+                ],
+                "essential": true,
+                "environment": [
+                  {
+                    "name": "PORT",
+                    "value": "3002"
+                  },
+                  {
+                    "name": "MONGODB_URI",
+                    "value": "${{ secrets.INOVA_MONGO_DB }}"
+                  }
+                ],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/inova-orderservice-class-definition",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "eu-north-1",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
 
-      - name: Fill in the new image ID and environment variables in the Amazon ECS task definition
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: inova-productservice-class-definition-revision1.json
-          container-name: inova-product_service
-          image: ${{ steps.build-image.outputs.image }}
-          environment-variables: |
-            MONGODB_URI=${{ secrets.INOVA_MONGO_DB }}
-            PORT=3001
+      - name: Register task definition
+        id: register-task
+        run: |
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          echo "task-definition-arn=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+          echo "Registered task definition: $TASK_DEF_ARN"
 
-      - name: Deploy Amazon ECS task definition
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: inova-productservice-class-definition-service-k0xa6m3d
-          cluster: default
-          wait-for-service-stability: true
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster default \
+            --service inova-orderservice-class-definition-service \
+            --task-definition ${{ steps.register-task.outputs.task-definition-arn }} \
+            --force-new-deployment \
+            --region eu-north-1
+
+      - name: Wait for deployment to stabilize
+        run: |
+          echo "Waiting for deployment to complete..."
+          sleep 30
+          aws ecs wait services-stable \
+            --cluster default \
+            --services inova-orderservice-class-definition-service \
+            --region eu-north-1 || true
+
+      - name: Get deployment info
+        run: |
+          TASK_ARN=$(aws ecs list-tasks \
+            --cluster default \
+            --service-name inova-orderservice-class-definition-service \
+            --query "taskArns[0]" \
+            --output text)
+          
+          if [ "$TASK_ARN" != "None" ] && [ -n "$TASK_ARN" ]; then
+            PUBLIC_IP=$(aws ecs describe-tasks \
+              --cluster default \
+              --tasks $TASK_ARN \
+              --query "tasks[0].attachments[0].details[?name=='publicIPv4Address'].value" \
+              --output text)
+            
+            echo "✅ Order Service deployed successfully!"
+            echo "📍 Service URL: http://$PUBLIC_IP:3002"
+            echo "💚 Health Check: http://$PUBLIC_IP:3002/health"
+            echo "📋 API Endpoint: http://$PUBLIC_IP:3002/api/orders"
+          else
+            echo "⚠️  No tasks found. Check the service status."
+          fi
