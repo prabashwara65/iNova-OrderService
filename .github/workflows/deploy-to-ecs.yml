@@ -85,28 +85,31 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
           echo "task-definition-arn=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+          echo "Registered task definition: $TASK_DEF_ARN"
 
       - name: Update ECS service
         run: |
           aws ecs update-service \
             --cluster order-service-cluster \
-            --service order-service \
+            --service inova-orderservice-class-definition-service-7q9qxv7z \
             --task-definition ${{ steps.register-task.outputs.task-definition-arn }} \
             --force-new-deployment \
             --region eu-north-1
 
       - name: Wait for service stability
         run: |
+          echo "Waiting for deployment to stabilize..."
+          sleep 30
           aws ecs wait services-stable \
             --cluster order-service-cluster \
-            --services order-service \
+            --services inova-orderservice-class-definition-service-7q9qxv7z \
             --region eu-north-1 || true
 
       - name: Get deployment info
         run: |
           TASK_ARN=$(aws ecs list-tasks \
             --cluster order-service-cluster \
-            --service-name order-service \
+            --service-name inova-orderservice-class-definition-service-7q9qxv7z \
             --query "taskArns[0]" \
             --output text)
           
