@@ -45,7 +45,7 @@ jobs:
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: inova-orderservice-class-definition-revision1.json
+          task-definition: inova-orderservice-class-definition.json
           container-name: inova-order_service
           image: ${{ steps.build-image.outputs.image }}
           environment-variables: |
