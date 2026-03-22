@@ -148,39 +148,29 @@ exports.getOrderByOrderId = async (req, res) => {
     }
 }
 
-exports.getOrdersByUserId = async (req, res) => {
+exports.getOrders = async (req, res) => {
     try {
-        const { userId } = req.params;
+        const { userId } = req.query;
+        const query = {};
 
-        if (!userId) {
-            return res.status(400).json({ message: "UserId required" });
+        if (userId) {
+            await userService.validateUser(userId);
+            query.userId = userId;
         }
 
-        await userService.validateUser(userId);
-
-        const orders = await Order.find({ userId }).sort(sortByNewest);
+        const orders = await Order.find(query).sort(sortByNewest);
 
         res.status(200).json({ orders });
     } catch (err) {
-        console.error("Get user orders error:", err.message);
+        console.error("Get orders error:", err.message);
         res.status(500).json({ message: err.message });
     }
 }
 
-exports.getAllOrders = async (req, res) => {
-    try {
-        const orders = await Order.find({}).sort(sortByNewest);
-
-        res.status(200).json({ orders });
-    } catch (err) {
-        console.error("Get all orders error:", err.message);
-        res.status(500).json({ message: err.message });
-    }
-}
-
-exports.cancelOrder = async (req, res) => {
+exports.updateOrder = async (req, res) => {
     try {
         const { orderId } = req.params;
+        const { action, shippingAddress } = req.body;
 
         const order = await Order.findOne({ orderId });
 
@@ -188,21 +178,36 @@ exports.cancelOrder = async (req, res) => {
             return res.status(404).json({ message: "Order not found" });
         }
 
-        if (order.status !== "PENDING") {
-            return res.status(400).json({
-                message: "Only pending orders can be cancelled",
+        if (action === "cancel") {
+            if (order.status !== "PENDING") {
+                return res.status(400).json({
+                    message: "Only pending orders can be cancelled",
+                });
+            }
+
+            order.status = "CANCELLED";
+            await order.save();
+
+            return res.status(200).json({
+                message: "Order cancelled successfully",
+                order,
             });
         }
 
-        order.status = "CANCELLED";
-        await order.save();
+        if (action === "checkout") {
+            req.body = {
+                userId: order.userId,
+                shippingAddress: shippingAddress || order.shippingAddress,
+            };
 
-        res.status(200).json({
-            message: "Order cancelled successfully",
-            order,
+            return exports.checkout(req, res);
+        }
+
+        return res.status(400).json({
+            message: "Unsupported order action",
         });
     } catch (err) {
-        console.error("Cancel order error:", err.message);
+        console.error("Update order error:", err.message);
         res.status(500).json({ message: err.message });
     }
 }
