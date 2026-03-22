@@ -211,3 +211,30 @@ exports.updateOrder = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 }
+
+exports.deleteOrder = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        const order = await Order.findOne({ orderId });
+
+        if (!order) {
+            return res.status(404).json({ message: "Order not found" });
+        }
+
+        if (order.status !== "PENDING") {
+            return res.status(400).json({
+                message: "Only pending orders can be deleted",
+            });
+        }
+
+        await order.deleteOne();
+
+        res.status(200).json({
+            message: "Order deleted successfully",
+        });
+    } catch (err) {
+        console.error("Delete order error:", err.message);
+        res.status(500).json({ message: err.message });
+    }
+}

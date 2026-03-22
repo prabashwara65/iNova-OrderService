@@ -8,6 +8,8 @@ router.route("/")
 
 router.route("/:orderId")
   .get(controller.getOrderByOrderId)
-  .patch(controller.updateOrder);
+  .put(controller.updateOrder)
+  .patch(controller.updateOrder)
+  .delete(controller.deleteOrder);
 
 module.exports = router
