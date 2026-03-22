@@ -1,12 +1,13 @@
 const express = require('express');
-const router = express.Router()
-const controller = require('../controllers/orderController')
+const router = express.Router();
+const controller = require('../controllers/orderController');
 
-router.post("/add", controller.addToCart)
-router.post("/checkout", controller.checkout)
-router.get("/", controller.getAllOrders)
-router.get("/user/:userId", controller.getOrdersByUserId)
-router.get("/:orderId", controller.getOrderByOrderId)
-router.patch("/:orderId/cancel", controller.cancelOrder)
+router.route("/")
+  .get(controller.getOrders)
+  .post(controller.addToCart);
+
+router.route("/:orderId")
+  .get(controller.getOrderByOrderId)
+  .patch(controller.updateOrder);
 
 module.exports = router
