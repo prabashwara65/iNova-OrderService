@@ -7,36 +7,32 @@ const sortByNewest = { createdAt: -1 };
 
 const normalizeShippingAddress = (shippingAddress) => {
   if (!shippingAddress) {
-    return undefined;
+    return "";
   }
 
   if (typeof shippingAddress === "string") {
-    return {
-      street: shippingAddress.trim(),
-      country: "",
-    };
+    return shippingAddress.trim();
   }
 
-  return {
-    fullName: shippingAddress.fullName || "",
-    street: shippingAddress.street || "",
-    city: shippingAddress.city || "",
-    postalCode: shippingAddress.postalCode || "",
-    country: shippingAddress.country || "",
-    phone: shippingAddress.phone || "",
-  };
+  // Convert object to string format
+  const parts = [
+    shippingAddress.fullName,
+    shippingAddress.street,
+    shippingAddress.city,
+    shippingAddress.postalCode,
+    shippingAddress.country,
+    shippingAddress.phone,
+  ].filter(part => part && part.trim());
+
+  return parts.join(", ");
 };
 
 const recalculateAmounts = (order) => {
-  order.subtotal = order.items.reduce(
+  // Calculate total from items only (since schema only has totalAmount)
+  order.totalAmount = order.items.reduce(
     (sum, item) => sum + item.quantity * item.priceAtPurchase,
     0
   );
-  order.taxAmount = 0;
-  order.shippingAmount = 0;
-  order.discountAmount = 0;
-  order.totalAmount =
-    order.subtotal + order.taxAmount + order.shippingAmount - order.discountAmount;
 };
 
 //add to cart
@@ -69,7 +65,6 @@ exports.addToCart = async (req, res) => {
       if (!order) {
       order = new Order({
         userId,
-        orderId: `ORD-${Date.now()}`, // unique order ID
         items: [],
         status: "PENDING",
       });
@@ -138,7 +133,6 @@ exports.checkout = async (req, res) => {
 
          if (!payment || payment.status !== "SUCCESS") {
            order.status = "CANCELLED";
-           order.paymentStatus = "FAILED";
            await order.save();
 
            return res.status(400).json({
@@ -153,7 +147,6 @@ exports.checkout = async (req, res) => {
 
          //confirm order
           order.status = "CONFIRMED";
-          order.paymentStatus = "PAID";
           await order.save();
 
           res.status(200).json({
