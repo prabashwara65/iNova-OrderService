@@ -1,178 +1,208 @@
-const Order = require('../models/Order');
+const Order = require("../models/Order");
+const userService = require("../services/userService");
+const productService = require("../services/productService");
+const paymentService = require("../services/paymentService");
 
-const parsePagination = (query) => {
-  const page = Math.max(parseInt(query.page, 10) || 1, 1);
-  const limit = Math.max(parseInt(query.limit, 10) || 10, 1);
-  return { page, limit };
-};
+const sortByNewest = { createdAt: -1 };
 
-const orderController = {
-  getAllOrders: async (req, res) => {
-    try {
-      const { page, limit } = parsePagination(req.query);
-      const { status, paymentStatus, userId } = req.query;
+//add to cart
+exports.addToCart = async (req, res) => {
+  try {
+    const { userId, productId, quantity, shippingAddress, imageUrl } = req.body;
 
-      const filter = {};
-      if (status) filter.status = status;
-      if (paymentStatus) filter.paymentStatus = paymentStatus;
-      if (userId) filter.userId = userId;
+    if (!userId || !productId || !quantity) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+   
+    //validate user
+    await userService.validateUser(userId)
 
-      const orders = await Order.find(filter)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit);
+    //get product
+    const product = await productService.getProduct(productId)
 
-      const total = await Order.countDocuments(filter);
+    if(!product) {
+        return res.status(404).json({message: "Product not found"});
+    }
 
-      res.json({
-        orders,
-        total,
-        totalPages: Math.ceil(total / limit),
-        currentPage: page
+    if(product.stock < quantity){
+        return res.status(400).json({message: "Insufficient stock"})
+    }
+
+    //find exisiting pending cart 
+    let order = await Order.findOne({userId, status: "PENDING" })
+
+    //if no cart - create new cart
+      if (!order) {
+      order = new Order({
+        userId,
+        orderId: `ORD-${Date.now()}`, // unique order ID
+        items: [],
+        status: "PENDING",
       });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
     }
-  },
 
-  getOrderById: async (req, res) => {
-    try {
-      const order = await Order.findById(req.params.id);
-      if (!order) {
-        return res.status(404).json({ error: 'Order not found' });
-      }
-      res.json(order);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+    // add item 
+    order.items.push({
+        productId,
+        quantity, 
+        priceAtPurchase: product.price,
+        imageUrl: imageUrl || "",
+    })
+
+    if (typeof shippingAddress === "string" && shippingAddress.trim()) {
+      order.shippingAddress = shippingAddress.trim();
     }
-  },
 
-  getOrderByNumber: async (req, res) => {
-    try {
-      const order = await Order.findOne({ orderNumber: req.params.orderNumber });
-      if (!order) {
-        return res.status(404).json({ error: 'Order not found' });
-      }
-      res.json(order);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
+    //recalculate total
+    order.totalAmount = order.items.reduce(
+        (sum, item) => sum + item.quantity * item.priceAtPurchase,
+        0
+    );
 
-  createOrder: async (req, res) => {
-    try {
-      const order = await Order.create(req.body);
-      res.status(201).json(order);
-    } catch (error) {
-      res.status(400).json({ error: error.message });
-    }
-  },
+    await order.save();
 
-  updateOrder: async (req, res) => {
-    try {
-      const order = await Order.findByIdAndUpdate(req.params.id, req.body, {
-        new: true,
-        runValidators: true
-      });
+    res.status(200).json({
+        message: "Item added to cart",
+        order,
+    })
 
-      if (!order) {
-        return res.status(404).json({ error: 'Order not found' });
-      }
-
-      res.json(order);
-    } catch (error) {
-      res.status(400).json({ error: error.message });
-    }
-  },
-
-  updateOrderStatus: async (req, res) => {
-    try {
-      const order = await Order.findByIdAndUpdate(
-        req.params.id,
-        { status: req.body.status },
-        { new: true, runValidators: true }
-      );
-
-      if (!order) {
-        return res.status(404).json({ error: 'Order not found' });
-      }
-
-      res.json(order);
-    } catch (error) {
-      res.status(400).json({ error: error.message });
-    }
-  },
-
-  updatePaymentStatus: async (req, res) => {
-    try {
-      const order = await Order.findByIdAndUpdate(
-        req.params.id,
-        { paymentStatus: req.body.paymentStatus },
-        { new: true, runValidators: true }
-      );
-
-      if (!order) {
-        return res.status(404).json({ error: 'Order not found' });
-      }
-
-      res.json(order);
-    } catch (error) {
-      res.status(400).json({ error: error.message });
-    }
-  },
-
-  cancelOrder: async (req, res) => {
-    try {
-      const order = await Order.findById(req.params.id);
-      if (!order) {
-        return res.status(404).json({ error: 'Order not found' });
-      }
-
-      if (order.status === 'DELIVERED') {
-        return res.status(400).json({ error: 'Delivered order cannot be cancelled' });
-      }
-
-      order.status = 'CANCELLED';
-      await order.save();
-
-      res.json(order);
-    } catch (error) {
-      res.status(400).json({ error: error.message });
-    }
-  },
-
-  getOrderSummary: async (req, res) => {
-    try {
-      const [summary] = await Order.aggregate([
-        {
-          $group: {
-            _id: null,
-            totalOrders: { $sum: 1 },
-            totalRevenue: {
-              $sum: {
-                $cond: [{ $eq: ['$paymentStatus', 'PAID'] }, '$totalAmount', 0]
-              }
-            },
-            pendingOrders: {
-              $sum: { $cond: [{ $eq: ['$status', 'PENDING'] }, 1, 0] }
-            },
-            cancelledOrders: {
-              $sum: { $cond: [{ $eq: ['$status', 'CANCELLED'] }, 1, 0] }
-            }
-          }
-        }
-      ]);
-
-      res.json(summary || {
-        totalOrders: 0,
-        totalRevenue: 0,
-        pendingOrders: 0,
-        cancelledOrders: 0
-      });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
+  } catch (err) {
+    console.error("Add to cart error:", err.message);
+    res.status(500).json({ message: err.message });
   }
-};
+}
 
-module.exports = orderController;
+//check out
+exports.checkout = async (req, res) => {
+    try {
+        const { userId, shippingAddress } = req.body
+
+        if(!userId){
+            return res.status(400).json({message: "UserId required"});
+        }
+
+        //find pending cart
+        const order = await Order.findOne({
+            userId,
+            status: "PENDING",
+        })
+
+        if(!order){
+            return res.status(400).json({message: "Cart empty"})
+        }
+
+        if (typeof shippingAddress === "string" && shippingAddress.trim()) {
+            order.shippingAddress = shippingAddress.trim();
+        }
+
+        //process payement
+        const payment = await paymentService.processPayment(
+            order.orderId,
+            userId,
+            order.totalAmount
+        )
+
+         if (!payment || payment.status !== "SUCCESS") {
+           order.status = "CANCELLED";
+           await order.save();
+
+           return res.status(400).json({
+             message: "Payment failed",
+           });
+         }
+
+         //Reduce stock
+         for (const item of order.items) {
+           await productService.reduceStock(item.productId, item.quantity);
+         }
+
+         //confirm order
+          order.status = "CONFIRMED";
+          await order.save();
+
+          res.status(200).json({
+            message: "Order confirmed",
+            order,
+          });
+
+    } catch (err){
+         console.error("Checkout error:", err.message);
+         res.status(500).json({ message: err.message });
+    }
+}
+
+exports.getOrderByOrderId = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        const order = await Order.findOne({ orderId });
+
+        if (!order) {
+            return res.status(404).json({ message: "Order not found" });
+        }
+
+        res.status(200).json({ order });
+    } catch (err) {
+        console.error("Get order error:", err.message);
+        res.status(500).json({ message: err.message });
+    }
+}
+
+exports.getOrdersByUserId = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        if (!userId) {
+            return res.status(400).json({ message: "UserId required" });
+        }
+
+        await userService.validateUser(userId);
+
+        const orders = await Order.find({ userId }).sort(sortByNewest);
+
+        res.status(200).json({ orders });
+    } catch (err) {
+        console.error("Get user orders error:", err.message);
+        res.status(500).json({ message: err.message });
+    }
+}
+
+exports.getAllOrders = async (req, res) => {
+    try {
+        const orders = await Order.find({}).sort(sortByNewest);
+
+        res.status(200).json({ orders });
+    } catch (err) {
+        console.error("Get all orders error:", err.message);
+        res.status(500).json({ message: err.message });
+    }
+}
+
+exports.cancelOrder = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        const order = await Order.findOne({ orderId });
+
+        if (!order) {
+            return res.status(404).json({ message: "Order not found" });
+        }
+
+        if (order.status !== "PENDING") {
+            return res.status(400).json({
+                message: "Only pending orders can be cancelled",
+            });
+        }
+
+        order.status = "CANCELLED";
+        await order.save();
+
+        res.status(200).json({
+            message: "Order cancelled successfully",
+            order,
+        });
+    } catch (err) {
+        console.error("Cancel order error:", err.message);
+        res.status(500).json({ message: err.message });
+    }
+}
