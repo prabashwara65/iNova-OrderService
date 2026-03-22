@@ -13,7 +13,7 @@ const PORT = process.env.PORT || 3002;
 connectDB();
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:1573'
+  origin: process.env.FRONTEND_URL || 'https://i-nova-frontend.vercel.app/'
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
