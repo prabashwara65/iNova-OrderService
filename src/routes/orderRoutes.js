@@ -1,17 +1,12 @@
 const express = require('express');
-const router = express.Router();
-const orderController = require('../controllers/orderController');
+const router = express.Router()
+const controller = require('../controllers/orderController')
 
-router.get('/', orderController.getAllOrders);
-router.get('/summary', orderController.getOrderSummary);
-router.get('/number/:orderNumber', orderController.getOrderByNumber);
-router.get('/:id', orderController.getOrderById);
+router.post("/add", controller.addToCart)
+router.post("/checkout", controller.checkout)
+router.get("/", controller.getAllOrders)
+router.get("/user/:userId", controller.getOrdersByUserId)
+router.get("/:orderId", controller.getOrderByOrderId)
+router.patch("/:orderId/cancel", controller.cancelOrder)
 
-router.post('/', orderController.createOrder);
-
-router.put('/:id', orderController.updateOrder);
-router.patch('/:id/status', orderController.updateOrderStatus);
-router.patch('/:id/payment-status', orderController.updatePaymentStatus);
-router.patch('/:id/cancel', orderController.cancelOrder); 
-
-module.exports = router;
+module.exports = router
