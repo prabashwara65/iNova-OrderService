@@ -5,6 +5,40 @@ const paymentService = require("../services/paymentService");
 
 const sortByNewest = { createdAt: -1 };
 
+const normalizeShippingAddress = (shippingAddress) => {
+  if (!shippingAddress) {
+    return undefined;
+  }
+
+  if (typeof shippingAddress === "string") {
+    return {
+      street: shippingAddress.trim(),
+      country: "",
+    };
+  }
+
+  return {
+    fullName: shippingAddress.fullName || "",
+    street: shippingAddress.street || "",
+    city: shippingAddress.city || "",
+    postalCode: shippingAddress.postalCode || "",
+    country: shippingAddress.country || "",
+    phone: shippingAddress.phone || "",
+  };
+};
+
+const recalculateAmounts = (order) => {
+  order.subtotal = order.items.reduce(
+    (sum, item) => sum + item.quantity * item.priceAtPurchase,
+    0
+  );
+  order.taxAmount = 0;
+  order.shippingAmount = 0;
+  order.discountAmount = 0;
+  order.totalAmount =
+    order.subtotal + order.taxAmount + order.shippingAmount - order.discountAmount;
+};
+
 //add to cart
 exports.addToCart = async (req, res) => {
   try {
@@ -49,15 +83,13 @@ exports.addToCart = async (req, res) => {
         imageUrl: imageUrl || "",
     })
 
-    if (typeof shippingAddress === "string" && shippingAddress.trim()) {
-      order.shippingAddress = shippingAddress.trim();
+    const normalizedShippingAddress = normalizeShippingAddress(shippingAddress);
+
+    if (normalizedShippingAddress) {
+      order.shippingAddress = normalizedShippingAddress;
     }
 
-    //recalculate total
-    order.totalAmount = order.items.reduce(
-        (sum, item) => sum + item.quantity * item.priceAtPurchase,
-        0
-    );
+    recalculateAmounts(order);
 
     await order.save();
 
@@ -91,8 +123,10 @@ exports.checkout = async (req, res) => {
             return res.status(400).json({message: "Cart empty"})
         }
 
-        if (typeof shippingAddress === "string" && shippingAddress.trim()) {
-            order.shippingAddress = shippingAddress.trim();
+        const normalizedShippingAddress = normalizeShippingAddress(shippingAddress);
+
+        if (normalizedShippingAddress) {
+            order.shippingAddress = normalizedShippingAddress;
         }
 
         //process payement
@@ -104,6 +138,7 @@ exports.checkout = async (req, res) => {
 
          if (!payment || payment.status !== "SUCCESS") {
            order.status = "CANCELLED";
+           order.paymentStatus = "FAILED";
            await order.save();
 
            return res.status(400).json({
@@ -118,6 +153,7 @@ exports.checkout = async (req, res) => {
 
          //confirm order
           order.status = "CONFIRMED";
+          order.paymentStatus = "PAID";
           await order.save();
 
           res.status(200).json({
